@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beanrunner"
+version = "0.2.0"
+description = "Local job runner with persistent state and a global bean command"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+bean = "src.cli:main"
+
+[tool.setuptools]
+packages = ["src"]
