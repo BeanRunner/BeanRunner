@@ -1,27 +1,24 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from enum import StrEnum
+from enum import Enum
 from typing import Any
 from uuid import uuid4
 
 
-class JobStatus(StrEnum):
+class JobStatus(str, Enum):
     """Ciclo de vida oficial del trabajo según RF-06."""
 
-    # Aceptado, pero aún no tiene un proceso hijo asignado.
     QUEUED = "QUEUED"
-    # El proceso hijo está activo y siendo supervisado.
     RUNNING = "RUNNING"
-    # Estado terminal: proceso terminó con código de salida 0.
     SUCCEEDED = "SUCCEEDED"
-    # Estado terminal: hubo error al iniciar o el proceso terminó distinto de 0.
     FAILED = "FAILED"
-    # Estado terminal: usuario o cierre de CLI solicitó detenerlo.
     CANCELED = "CANCELED"
 
-#maquina de estados finitos
+
 _ALLOWED_TRANSITIONS: dict[JobStatus, frozenset[JobStatus]] = {
-    JobStatus.QUEUED: frozenset({JobStatus.RUNNING, JobStatus.CANCELED}),
+    JobStatus.QUEUED: frozenset(
+        {JobStatus.RUNNING, JobStatus.CANCELED, JobStatus.FAILED}
+    ),
     JobStatus.RUNNING: frozenset(
         {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELED}
     ),
@@ -35,29 +32,45 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _parse_datetime(
+    value: Any,
+    field_name: str,
+    *,
+    optional: bool = False,
+) -> datetime | None:
+    if value is None and optional:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} debe ser una fecha ISO.")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError(f"{field_name} no contiene una fecha ISO válida.") from error
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field_name} debe incluir zona horaria.")
+    return parsed
+
+
 @dataclass(slots=True)
 class Job:
     """Datos compartidos del trabajo entre runner, executor, manager y CLI."""
 
-    # Argumentos del programa: el primer elemento es el ejecutable.
     command: list[str]
-    # UUID usado para buscar el trabajo en los componentes de BeanRunner.
     id: str = field(default_factory=lambda: str(uuid4()))
-    # Estado consultado por runner, manager y CLI; inicia antes de ejecutar.
     status: JobStatus = JobStatus.QUEUED
     created_at: datetime = field(default_factory=_utcnow)
     started_at: datetime | None = None
     finished_at: datetime | None = None
     exit_code: int | None = None
-    # PID del sistema operativo, disponible solo después de iniciar el hijo.
     pid: int | None = None
-    # Detalle de error cuando no se puede iniciar o supervisar el proceso.
     error_message: str | None = None
-    # Canales se mantienen separados para que la CLI pueda mostrar cada uno.
     stdout: str = ""
     stderr: str = ""
-    # Señal interna leída por el monitor para asignar CANCELED al terminar.
     cancel_requested: bool = False
+    # Idempotency key supplied by a client so transport retries do not duplicate work.
+    request_id: str | None = None
+    # Working directory belongs to the submitted command, not the daemon process.
+    cwd: str | None = None
 
     @property
     def is_terminal(self) -> bool:
@@ -77,7 +90,7 @@ class Job:
         self.status = new_status
 
     def to_dict(self, include_output: bool = False) -> dict[str, Any]:
-        """Soporte para serialización/persistencia (RF-12)."""
+        """Convierte metadatos a valores JSON serializables."""
         data: dict[str, Any] = {
             "id": self.id,
             "command": list(self.command),
@@ -88,8 +101,75 @@ class Job:
             "exit_code": self.exit_code,
             "pid": self.pid,
             "error_message": self.error_message,
+            "request_id": self.request_id,
+            "cwd": self.cwd,
         }
         if include_output:
             data["stdout"] = self.stdout
             data["stderr"] = self.stderr
         return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Job":
+        """Restore a persisted job, rejecting malformed or unsupported records."""
+        command = data.get("command")
+        if not isinstance(command, list) or not all(
+            isinstance(argument, str) for argument in command
+        ):
+            raise ValueError("command debe ser una lista de texto")
+        if not command or not command[0].strip():
+            raise ValueError("command debe incluir un ejecutable")
+        job_id = data.get("id")
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError("id debe ser texto no vacío")
+
+        try:
+            status = JobStatus(data["status"])
+        except (KeyError, ValueError, TypeError) as error:
+            raise ValueError("status no es un estado reconocido") from error
+
+        exit_code = data.get("exit_code")
+        pid = data.get("pid")
+        if exit_code is not None and (
+            not isinstance(exit_code, int) or isinstance(exit_code, bool)
+        ):
+            raise ValueError("exit_code debe ser entero o null")
+        if pid is not None and (not isinstance(pid, int) or isinstance(pid, bool)):
+            raise ValueError("pid debe ser entero o null")
+
+        error_message = data.get("error_message")
+        request_id = data.get("request_id")
+        cwd = data.get("cwd")
+        if error_message is not None and not isinstance(error_message, str):
+            raise ValueError("error_message debe ser texto o null")
+        if request_id is not None and not isinstance(request_id, str):
+            raise ValueError("request_id debe ser texto o null")
+        if cwd is not None and not isinstance(cwd, str):
+            raise ValueError("cwd debe ser texto o null")
+
+        created_at = _parse_datetime(data.get("created_at"), "created_at")
+        started_at = _parse_datetime(
+            data.get("started_at"),
+            "started_at",
+            optional=True,
+        )
+        finished_at = _parse_datetime(
+            data.get("finished_at"),
+            "finished_at",
+            optional=True,
+        )
+        if created_at is None:
+            raise ValueError("created_at no puede ser null")
+        return cls(
+            id=job_id,
+            command=command,
+            status=status,
+            created_at=created_at,
+            started_at=started_at,
+            finished_at=finished_at,
+            exit_code=exit_code,
+            pid=pid,
+            error_message=error_message,
+            request_id=request_id,
+            cwd=cwd,
+        )

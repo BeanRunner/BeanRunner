@@ -25,33 +25,33 @@ class JobSubmitter:
     @staticmethod
     def _parse_string(command: str) -> list[str]:
         if not command.strip():
-            raise InvalidCommandError("El comando no puede estar vacío.")
+            raise InvalidCommandError("RF-02: El comando no puede estar vacío.")
         try:
             return shlex.split(command)
         except ValueError as error:
             raise InvalidCommandError(
-                f"Comando malformado o comillas sin cerrar: {error}"
+                f"RF-02: Comando malformado o comillas sin cerrar: {error}"
             ) from error
 
     @staticmethod
     def _parse_list(command: list[str]) -> list[str]:
         if not command:
-            raise InvalidCommandError("La lista de comandos no puede estar vacía.")
+            raise InvalidCommandError("RF-02: La lista de comandos no puede estar vacía.")
         if not all(isinstance(arg, str) for arg in command):
-            raise InvalidCommandError("Todos los argumentos deben ser texto.")
+            raise InvalidCommandError("RF-02: Todos los argumentos deben ser texto.")
         if not command[0].strip():
-            raise InvalidCommandError("El ejecutable no puede estar vacío.")
+            raise InvalidCommandError("RF-02: El ejecutable no puede estar vacío.")
         return list(command)
 
     def validate_command(self, raw_command: RawCommand) -> list[str]:
         """Rechaza comandos vacíos o malformados y devuelve los argumentos analizados."""
         if raw_command is None:
-            raise InvalidCommandError("El comando no puede ser nulo.")
+            raise InvalidCommandError("RF-02: El comando no puede ser nulo.")
         if isinstance(raw_command, str):
             return self._parse_string(raw_command)
         if isinstance(raw_command, list):
             return self._parse_list(raw_command)
-        raise InvalidCommandError("Formato no soportado. Debe ser string o list.")
+        raise InvalidCommandError("RF-02: Formato no soportado. Debe ser string o list.")
 
     def submit_job(self, raw_command: RawCommand) -> Job:
         """Acepta un comando válido y devuelve el trabajo en cola."""

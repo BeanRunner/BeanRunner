@@ -2,7 +2,6 @@
 
 import logging
 import threading
-from datetime import datetime, timezone
 
 from .executor import JobExecutor
 from .models import Job, JobStatus
@@ -73,8 +72,7 @@ class JobManager:
 
             if job.status == JobStatus.QUEUED:
                 # Un trabajo en cola no tiene proceso que enviar a executor.cancel().
-                job.status = JobStatus.CANCELED
-                job.finished_at = datetime.now(timezone.utc).isoformat()
+                job.transition_to(JobStatus.CANCELED)
                 logger.info("Trabajo en cola %s cancelado.", job_id)
                 return True, f"Trabajo {job_id} cancelado antes de ejecutarse."
 
