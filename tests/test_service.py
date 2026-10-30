@@ -12,7 +12,11 @@ from src.service import ServiceClient, ServiceError
 class ServiceTests(unittest.TestCase):
     def test_json_lines_client_uses_persistent_runner(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
-            runner = JobRunner(data_dir=temporary_directory)
+            runner = JobRunner(
+                data_dir=temporary_directory,
+                max_concurrency=1,
+                max_queue_size=1,
+            )
             server = BeanServer(("127.0.0.1", 0), runner)
             server_thread = threading.Thread(target=server.serve_forever, daemon=True)
             server_thread.start()
@@ -65,6 +69,34 @@ class ServiceTests(unittest.TestCase):
                         for event in events
                     )
                 )
+
+                running = client.request(
+                    "submit",
+                    command=[
+                        sys.executable,
+                        "-c",
+                        "import time; time.sleep(30)",
+                    ],
+                    request_id="queue-capacity-running",
+                )
+                queued = client.request(
+                    "submit",
+                    command=[
+                        sys.executable,
+                        "-c",
+                        "import time; time.sleep(30)",
+                    ],
+                    request_id="queue-capacity-queued",
+                )
+                self.assertEqual(running["job"]["status"], "RUNNING")
+                self.assertEqual(queued["job"]["status"], "QUEUED")
+                with self.assertRaisesRegex(ServiceError, "Cola llena"):
+                    client.request(
+                        "submit",
+                        command=[sys.executable, "-c", "print('rejected')"],
+                        request_id="queue-capacity-rejected",
+                    )
+                self.assertEqual(len(client.request("jobs")["jobs"]), 3)
 
                 self.assertTrue(client.request("stop")["ok"])
                 server_thread.join(timeout=3)

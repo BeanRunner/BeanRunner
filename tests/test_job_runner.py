@@ -2,7 +2,7 @@ import sys
 import time
 import unittest
 
-from src.Job_Runner import JobRunner
+from src.Job_Runner import JobRunner, QueueCapacityError
 from src.models import JobStatus
 
 
@@ -109,6 +109,37 @@ class JobRunnerTests(unittest.TestCase):
             self.wait_for_completion(runner, first.id),
             JobStatus.CANCELED,
         )
+
+    def test_rejects_submission_when_waiting_queue_is_full(self) -> None:
+        runner = JobRunner(max_concurrency=1, max_queue_size=1)
+        first = runner.submit_job(
+            [sys.executable, "-c", "import time; time.sleep(30)"]
+        )
+        queued = runner.submit_job(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            request_id="queued-request",
+        )
+
+        try:
+            self.assertEqual(first.status, JobStatus.RUNNING)
+            self.assertEqual(queued.status, JobStatus.QUEUED)
+            self.assertIs(
+                runner.submit_job(
+                    [sys.executable, "-c", "import time; time.sleep(30)"],
+                    request_id="queued-request",
+                ),
+                queued,
+            )
+            job_count = len(runner.jobs)
+
+            with self.assertRaisesRegex(QueueCapacityError, "Cola llena"):
+                runner.submit_job([sys.executable, "-c", "print('rejected')"])
+
+            self.assertEqual(len(runner.jobs), job_count)
+            self.assertEqual(len(runner.queue), 1)
+            self.assertEqual(queued.status, JobStatus.QUEUED)
+        finally:
+            runner.shutdown()
 
 
 if __name__ == "__main__":

@@ -134,7 +134,12 @@ independientes del mismo comando crean trabajos distintos.
 Los argumentos se separan respetando comillas, pero los trabajos se inician
 sin shell implícito. Envía únicamente comandos y programas confiables.
 `max_concurrency` es 3 por defecto; el resto de trabajos válidos espera en
-cola hasta que haya un espacio disponible.
+cola hasta que haya un espacio disponible. La cola admite hasta 5 trabajos en
+espera por defecto; al llenarse, los nuevos envíos se rechazan explícitamente
+sin registrarse. Los trabajos en ejecución no cuentan para ese límite. Para
+cambiarlo en el proyecto, modifica `DEFAULT_MAX_QUEUE_SIZE` en
+`src/Job_Runner.py`; también se puede indicar `max_queue_size` al construir un
+`JobRunner`.
 
 Sin opciones, `python3 -m src.main` conserva el comportamiento de arranque
 simple y termina después de mostrar un mensaje. Para una demostración

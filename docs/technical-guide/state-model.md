@@ -39,11 +39,13 @@ stateDiagram-v2
 1. Solo las solicitudes válidas crean un trabajo.
 2. Cada trabajo tiene un ID único y comienza en `QUEUED`.
 3. El número de procesos activos no supera `max_concurrency` (por defecto 3).
-4. El proceso se ejecuta sin shell implícito y sus flujos se recolectan por
+4. La cola admite hasta 5 trabajos en espera por defecto; los envíos nuevos se
+   rechazan explícitamente cuando alcanza su capacidad.
+5. El proceso se ejecuta sin shell implícito y sus flujos se recolectan por
    separado.
-5. Un trabajo terminado registra `finished_at` y, si se inició un proceso, su
+6. Un trabajo terminado registra `finished_at` y, si se inició un proceso, su
    código de salida.
-6. Los estados terminales implementados son `SUCCEEDED`, `FAILED` y
+7. Los estados terminales implementados son `SUCCEEDED`, `FAILED` y
    `CANCELED`.
 
 ## Recuperación futura

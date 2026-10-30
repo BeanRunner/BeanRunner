@@ -12,6 +12,13 @@ from .storage import JobStore, StorageError
 from .submitter import JobSubmitter, RawCommand
 
 
+DEFAULT_MAX_QUEUE_SIZE = 5
+
+
+class QueueCapacityError(ValueError):
+    """Raised when a new job would exceed the waiting queue capacity."""
+
+
 class JobRunner:
     """Coordina los componentes que participan en el ciclo de vida de un trabajo.
 
@@ -23,9 +30,12 @@ class JobRunner:
         self,
         max_concurrency: int = 3,
         data_dir: str | Path | None = None,
+        max_queue_size: int = DEFAULT_MAX_QUEUE_SIZE,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency debe ser al menos 1.")
+        if max_queue_size < 1:
+            raise ValueError("max_queue_size debe ser al menos 1.")
 
         # Almacenamiento compartido: submitter crea trabajos y manager los consulta.
         self.store = JobStore(data_dir) if data_dir is not None else None
@@ -35,6 +45,8 @@ class JobRunner:
         self.queue: deque[str] = deque()
         # Límite de procesos hijos que pueden ejecutarse simultáneamente.
         self.max_concurrency = max_concurrency
+        # Límite de trabajos en espera; los procesos activos no cuentan.
+        self.max_queue_size = max_queue_size
         # El mismo lock coordina cambios en trabajos, cola y operaciones del manager.
         self._lock = threading.RLock()
         # Impide iniciar trabajos nuevos cuando shutdown ya comenzó.
@@ -90,6 +102,18 @@ class JobRunner:
                     {"request_id": request_id},
                 )
                 return existing
+
+            queued_count = sum(
+                1
+                for job_id in self.queue
+                if (queued_job := self.jobs.get(job_id)) is not None
+                and queued_job.status == JobStatus.QUEUED
+            )
+            if queued_count >= self.max_queue_size:
+                raise QueueCapacityError(
+                    "Cola llena: capacidad máxima de "
+                    f"{self.max_queue_size} trabajos en espera."
+                )
 
             job = self.submitter.submit_job(valid_command)
             job.request_id = request_id
