@@ -101,6 +101,7 @@ class Job:
             "exit_code": self.exit_code,
             "pid": self.pid,
             "error_message": self.error_message,
+            "cancel_requested": self.cancel_requested,
             "request_id": self.request_id,
             "cwd": self.cwd,
         }
@@ -138,10 +139,13 @@ class Job:
             raise ValueError("pid debe ser entero o null")
 
         error_message = data.get("error_message")
+        cancel_requested = data.get("cancel_requested", False)
         request_id = data.get("request_id")
         cwd = data.get("cwd")
         if error_message is not None and not isinstance(error_message, str):
             raise ValueError("error_message debe ser texto o null")
+        if not isinstance(cancel_requested, bool):
+            raise ValueError("cancel_requested debe ser booleano")
         if request_id is not None and not isinstance(request_id, str):
             raise ValueError("request_id debe ser texto o null")
         if cwd is not None and not isinstance(cwd, str):
@@ -170,6 +174,7 @@ class Job:
             exit_code=exit_code,
             pid=pid,
             error_message=error_message,
+            cancel_requested=cancel_requested,
             request_id=request_id,
             cwd=cwd,
         )

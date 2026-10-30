@@ -3,7 +3,9 @@
 import json
 import os
 import threading
+import time
 from pathlib import Path
+from uuid import uuid4
 
 from .models import Job
 
@@ -85,12 +87,25 @@ class JobStore:
 
     @staticmethod
     def _atomic_write(path: Path, content: bytes) -> None:
-        temporary_path = path.with_name(f"{path.name}.tmp")
-        with temporary_path.open("wb") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary_path, path)
+        temporary_path = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
+        try:
+            with temporary_path.open("wb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            for attempt in range(5):
+                try:
+                    os.replace(temporary_path, path)
+                    break
+                except PermissionError:
+                    if os.name != "nt" or attempt == 4:
+                        raise
+                    time.sleep(0.01 * (attempt + 1))
+        finally:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
         if os.name == "posix":
             directory_fd = os.open(path.parent, os.O_RDONLY)
             try:

@@ -172,7 +172,11 @@ class JobRunner:
                 if was_queued:
                     self._persist(job, "job_cancelled")
                 else:
-                    self._record("job_cancel_requested", job)
+                    self._persist(
+                        job,
+                        "job_cancel_requested",
+                        {"cancel_requested": job.cancel_requested},
+                    )
             elif not result[0]:
                 if self.event_log is not None:
                     self.event_log.record(
@@ -206,7 +210,10 @@ class JobRunner:
             job_ids = list(self.jobs)
 
         for job in running_jobs:
-            self.manager.cancel_job(job.id)
+            try:
+                self.cancel_job(job.id)
+            except StorageError as error:
+                persistence_error = persistence_error or error
         self.executor.wait_for_jobs(job_ids)
         if persistence_error is not None:
             raise persistence_error

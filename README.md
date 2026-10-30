@@ -11,9 +11,9 @@ asignarles un ID, ejecutarlos en procesos hijos con concurrencia limitada,
 consultar/listar trabajos, cancelarlos y recuperar su código de salida y
 `stdout`/`stderr`. Una entrada inválida se informa sin cerrar la sesión.
 
-La CLI interactiva original mantiene su estado en memoria. El comando global
-`bean` usa ahora un servicio local persistente que se inicia automáticamente;
-el servicio solo escucha en loopback. No se incluye operación remota todavía.
+Tanto la CLI interactiva como el comando global `bean` persisten los metadatos
+de los trabajos. `bean` usa un servicio local que se inicia automáticamente y
+solo escucha en loopback. No se incluye operación remota todavía.
 
 ## Requisitos
 
@@ -112,8 +112,33 @@ bean status <job-id>      # Consulta estado y metadatos
 bean output <job-id>      # Consulta stdout y stderr
 bean cancel <job-id>      # Cancela un trabajo
 bean events               # Muestra eventos recientes
+bean doctor               # Diagnostica configuración y conexión al servicio
 bean stop                 # Detiene el servicio local
 ```
+
+### Ayuda y opciones de la CLI
+
+`bean help <comando>` muestra la sintaxis y el propósito de un comando; por
+ejemplo, `bean help cancel`. Las opciones globales deben ir antes del comando:
+
+```text
+bean --json jobs          # Salida JSON para scripts
+bean --quiet cancel ID    # Oculta confirmaciones, conserva errores
+bean --no-color jobs      # Desactiva colores en terminales compatibles
+```
+
+Los errores de uso devuelven código `2`; los errores del servicio u operación,
+código `1`; las operaciones exitosas, código `0`. `bean doctor` revisa la
+versión de Python, la carpeta de datos y la configuración del servicio, e
+informa si el servicio local responde sin iniciarlo. El servicio se inicia
+automáticamente cuando se ejecuta una operación normal.
+
+En `bean --interactive`, Tab completa comandos y filtros de estado cuando la
+plataforma dispone del módulo `readline`. El historial se guarda en
+`cli_history.jsonl` dentro de la carpeta de datos, se puede consultar con
+`history` y se recupera con las teclas de historial en terminales compatibles.
+Las dos formas de abrir la consola (`bean --interactive` y
+`python -m src.main --interactive`) usan la misma interfaz.
 
 Los argumentos se ejecutan sin shell implícito. Por eso el ejecutable debe
 existir en el `PATH` del sistema donde corre el servicio. `bean ls` ejecuta el

@@ -1,7 +1,7 @@
 # Modelo de estados de los trabajos (RF-06)
 
-Este documento describe los estados implementados en BeanRunner para el Hito 1
-y distingue las funciones futuras que todavía no tienen persistencia.
+Este documento describe los estados y la persistencia implementados en
+BeanRunner.
 
 ## Estados implementados
 
@@ -13,10 +13,12 @@ y distingue las funciones futuras que todavía no tienen persistencia.
 | `FAILED` | Terminal | El proceso terminó con error o no pudo iniciarse. | Código de salida distinto de `0` o error de lanzamiento. |
 | `CANCELED` | Terminal | Se canceló un trabajo en cola o se terminó su proceso hijo activo. | Cancelación solicitada por el usuario o al cerrar la CLI. |
 
-Cada trabajo en memoria conserva su ID, comando, estado, timestamps, PID si se
-inició el proceso, código de salida y `stdout`/`stderr`. Los resultados se
-pierden al cerrar la aplicación: la persistencia y recuperación no forman parte
-de la implementación actual.
+Cada trabajo conserva su ID, comando, estado, timestamps, PID si se inició el
+proceso, código de salida, solicitud de cancelación y `stdout`/`stderr`. La CLI
+interactiva y el servicio local guardan los metadatos al aceptar el trabajo,
+iniciarlo, solicitar su cancelación y finalizarlo. Las salidas se guardan al
+terminar el proceso. Al iniciar, los trabajos que quedaron `QUEUED` o `RUNNING`
+se marcan como `FAILED` con una explicación de la interrupción; no se reanudan.
 
 ## Diagrama de transición implementado
 
@@ -48,10 +50,9 @@ stateDiagram-v2
 7. Los estados terminales implementados son `SUCCEEDED`, `FAILED` y
    `CANCELED`.
 
-## Recuperación futura
+## Estado de trabajos interrumpidos
 
 `INTERRUPTED` se propuso para reconocer trabajos que estuvieran ejecutándose
-durante el reinicio o caída del daemon. No forma parte del enum ni del flujo
-actual: no hay daemon persistente ni recuperación de historial todavía. Se
-deberá añadir junto con la persistencia (RF-12/RF-13), no reportar como
-funcionalidad ya implementada.
+durante el reinicio o caída del daemon. No forma parte del enum actual: los
+trabajos persistidos que estaban activos se marcan como `FAILED`, conservando
+un mensaje que explica que fueron interrumpidos.
