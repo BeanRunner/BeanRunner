@@ -47,7 +47,7 @@ class JobManager:
         if not jobs:
             return "No hay trabajos registrados."
 
-        header = f"{'JOB ID':<36} {'PID':<8} {'ESTADO':<12} {'CÓDIGO':<8} COMANDO"
+        header = f"{'JOB ID':<36} {'PID':<8} {'ESTADO':<12} {'CÓDIGO':<8} {'INICIO':<20} COMANDO"
         separator = "-" * len(header)
         lines = [header, separator]
 
@@ -55,10 +55,11 @@ class JobManager:
             # PID y código aún no existen mientras el trabajo espera en cola.
             pid = str(job.pid) if job.pid is not None else "-"
             exit_code = str(job.exit_code) if job.exit_code is not None else "-"
+            inicio = job.started_at.strftime("%Y-%m-%d %H:%M:%S") if job.started_at else "-"
             command = " ".join(job.command)
             lines.append(
                 f"{job.id:<36} {pid:<8} {job.status.value:<12} "
-                f"{exit_code:<8} {command}"
+                f"{exit_code:<8} {inicio:<20} {command}"
             )
 
         return "\n".join(lines)

@@ -111,6 +111,10 @@ class ServiceClient:
             self.host,
             "--port",
             str(self.port),
+            "--max-concurrency",
+            os.environ.get("BEANRUNNER_CONCURRENCY", "3"),
+            "--max-queue-size",
+            os.environ.get("BEANRUNNER_QUEUE_SIZE", "100")
         ]
         try:
             with log_path.open("ab") as log_stream:

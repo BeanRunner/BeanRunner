@@ -22,6 +22,7 @@ class JobRunner:
     def __init__(
         self,
         max_concurrency: int = 3,
+        max_queue_size: int = 100, # capacidad máxima de la cola
         data_dir: str | Path | None = None,
     ) -> None:
         if max_concurrency < 1:
@@ -35,6 +36,7 @@ class JobRunner:
         self.queue: deque[str] = deque()
         # Límite de procesos hijos que pueden ejecutarse simultáneamente.
         self.max_concurrency = max_concurrency
+        self.max_queue_size = max_queue_size
         # El mismo lock coordina cambios en trabajos, cola y operaciones del manager.
         self._lock = threading.RLock()
         # Impide iniciar trabajos nuevos cuando shutdown ya comenzó.
@@ -77,6 +79,9 @@ class JobRunner:
         with self._lock:
             if self._shutting_down:
                 raise RuntimeError("BeanRunner se está cerrando y no acepta trabajos.")
+            # Rechazo de cola llena
+            if len(self.queue) >= self.max_queue_size:
+                raise ValueError("La cola de trabajos ha alcanzado su capacidad máxima.")
             if request_id is not None and request_id in self._request_jobs:
                 existing = self._request_jobs[request_id]
                 if existing.command != valid_command or existing.cwd != cwd:
