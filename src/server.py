@@ -168,14 +168,14 @@ class BeanServer(socketserver.ThreadingTCPServer):
             self.shutdown()
 
 
-def serve(data_dir: Path, host: str, port: int) -> None:
+def serve(data_dir: Path, host: str, port: int, max_concurrency: int, max_queue_size: int) -> None:
     if host != "127.0.0.1":
         raise ValueError("El servicio solo puede escuchar en loopback por ahora.")
     server = BeanServer((host, port), None)
     runner: JobRunner | None = None
     try:
         event_log = EventLog(data_dir)
-        runner = JobRunner(data_dir=data_dir)
+        runner = JobRunner(data_dir=data_dir, max_concurrency=max_concurrency, max_queue_size=max_queue_size)
         server.runner = runner
         event_log.record("service_started", details={"host": host, "port": port})
         with server:
@@ -191,6 +191,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--max-concurrency", type=int, default=3)
+    parser.add_argument("--max-queue-size", type=int, default=100)
     arguments = parser.parse_args(argv)
     log_path = arguments.data_dir / "daemon.log"
     arguments.data_dir.mkdir(parents=True, exist_ok=True)
@@ -201,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         encoding="utf-8",
     )
     try:
-        serve(arguments.data_dir, arguments.host, arguments.port)
+        serve(arguments.data_dir, arguments.host, arguments.port, arguments.max_concurrency, arguments.max_queue_size)
     except (OSError, ValueError, RuntimeError) as error:
         logging.exception("No se pudo iniciar el servicio")
         print(f"BeanRunner: no se pudo iniciar el servicio: {error}")
