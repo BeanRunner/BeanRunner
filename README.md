@@ -168,6 +168,9 @@ cambiarlo en el proyecto, modifica `DEFAULT_MAX_QUEUE_SIZE` en
 Al finalizar o cancelar un trabajo, BeanRunner recoge el proceso hijo, drena y
 cierra sus pipes de salida y espera a que termine el hilo monitor. El cierre
 del runner cancela los trabajos activos y espera a que sus monitores finalicen.
+La cancelación intenta primero terminar el proceso y espera 1 segundo; si sigue
+activo, lo fuerza con `kill` y espera hasta 1 segundo para confirmar. Si tampoco
+se confirma el cierre, informa el error y mantiene el proceso bajo supervisión.
 
 Sin opciones, `python3 -m src.main` conserva el comportamiento de arranque
 simple y termina después de mostrar un mensaje. Para una demostración

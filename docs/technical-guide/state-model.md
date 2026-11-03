@@ -23,6 +23,14 @@ no se puede reconstruir con seguridad la supervisión ni los pipes del proceso.
 Al finalizar o cancelar, el monitor recoge el proceso y cierra sus pipes; el
 cierre del runner espera a que sus monitores terminen.
 
+## Escalamiento de cancelación
+
+Para un trabajo activo, BeanRunner solicita primero la terminación normal y
+espera hasta 1 segundo. Si el proceso sigue activo, envía `kill` y espera hasta
+1 segundo adicional. Si el sistema operativo no confirma el cierre, la
+cancelación devuelve un error explícito y el proceso permanece registrado y
+bajo supervisión; no se informa falsamente que terminó.
+
 ## Diagrama de transición implementado
 
 ```mermaid

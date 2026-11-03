@@ -83,8 +83,16 @@ class JobExecutor:
         monitor.start()
         return True
 
-    def cancel(self, job: Job, grace_seconds: float = 1.0) -> tuple[bool, str]:
-        """Termina el hijo y fuerza su cierre si no responde en el plazo dado."""
+    def cancel(
+        self,
+        job: Job,
+        grace_seconds: float = 1.0,
+        kill_timeout_seconds: float = 1.0,
+    ) -> tuple[bool, str]:
+        """Escalate from terminate to kill when a process ignores cancellation."""
+        if grace_seconds < 0 or kill_timeout_seconds < 0:
+            raise ValueError("Los plazos de cancelación no pueden ser negativos.")
+
         with self._lock:
             # El ID conecta el objeto Job con el Popen creado por execute().
             process = self.processes.get(job.id)
@@ -100,16 +108,49 @@ class JobExecutor:
                 logger.error("No se pudo terminar el trabajo %s: %s", job.id, error)
                 return False, f"No se pudo terminar el proceso: {error}"
 
-        # Se da tiempo para terminar normalmente antes de forzar la terminación.
         try:
             process.wait(timeout=grace_seconds)
         except subprocess.TimeoutExpired:
             logger.warning(
-                "El trabajo %s ignoró SIGTERM; se enviará terminación forzada.",
+                "El trabajo %s no terminó tras %.2f s; escalando a kill.",
+                job.id,
+                grace_seconds,
+            )
+            try:
+                process.kill()
+            except OSError as error:
+                if process.poll() is None:
+                    logger.error(
+                        "No se pudo escalar la cancelación del trabajo %s: %s",
+                        job.id,
+                        error,
+                    )
+                    return False, f"No se pudo forzar la terminación: {error}"
+            try:
+                process.wait(timeout=kill_timeout_seconds)
+            except subprocess.TimeoutExpired:
+                logger.error(
+                    "El trabajo %s sigue activo %.2f s después de kill.",
+                    job.id,
+                    kill_timeout_seconds,
+                )
+                return (
+                    False,
+                    "No se pudo confirmar la terminación forzada; "
+                    "el proceso sigue bajo supervisión.",
+                )
+            except OSError as error:
+                logger.exception(
+                    "No se pudo confirmar la terminación del trabajo %s",
+                    job.id,
+                )
+                return False, f"No se pudo confirmar la terminación: {error}"
+        except OSError as error:
+            logger.exception(
+                "Falló la espera de cancelación del trabajo %s",
                 job.id,
             )
-            process.kill()
-            process.wait()
+            return False, f"No se pudo esperar la terminación: {error}"
 
         return True, "Se solicitó la terminación del proceso."
 

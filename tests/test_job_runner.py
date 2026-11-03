@@ -1,9 +1,38 @@
+import subprocess
 import sys
+import tempfile
 import time
 import unittest
 
 from src.Job_Runner import JobRunner, QueueCapacityError
-from src.models import JobStatus
+from src.executor import JobExecutor
+from src.models import Job, JobStatus
+from src.storage import JobStore
+
+
+class FakeUnresponsiveProcess:
+    def __init__(self, *, stops_after_kill: bool) -> None:
+        self.stops_after_kill = stops_after_kill
+        self.killed = False
+        self.returncode = None
+        self.actions: list[str] = []
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.actions.append("terminate")
+
+    def kill(self) -> None:
+        self.actions.append("kill")
+        self.killed = True
+
+    def wait(self, timeout: float) -> int:
+        self.actions.append("wait")
+        if self.killed and self.stops_after_kill:
+            self.returncode = -9
+            return self.returncode
+        raise subprocess.TimeoutExpired("blocked", timeout)
 
 
 class JobRunnerTests(unittest.TestCase):
@@ -92,6 +121,67 @@ class JobRunnerTests(unittest.TestCase):
         self.assertIsNotNone(process.returncode)
         self.assertTrue(process.stdout.closed)
         self.assertTrue(process.stderr.closed)
+
+    def test_cancellation_escalates_to_kill_after_grace_period(self) -> None:
+        executor = JobExecutor()
+        job = Job(command=["blocked"])
+        job.transition_to(JobStatus.RUNNING)
+        process = FakeUnresponsiveProcess(stops_after_kill=True)
+        executor.processes[job.id] = process
+
+        canceled, message = executor.cancel(
+            job,
+            grace_seconds=0.01,
+            kill_timeout_seconds=0.02,
+        )
+
+        self.assertTrue(canceled, message)
+        self.assertEqual(process.actions, ["terminate", "wait", "kill", "wait"])
+        self.assertTrue(job.cancel_requested)
+
+    def test_cancellation_reports_when_kill_does_not_stop_process(self) -> None:
+        executor = JobExecutor()
+        job = Job(command=["blocked"])
+        job.transition_to(JobStatus.RUNNING)
+        process = FakeUnresponsiveProcess(stops_after_kill=False)
+        executor.processes[job.id] = process
+
+        canceled, message = executor.cancel(
+            job,
+            grace_seconds=0,
+            kill_timeout_seconds=0,
+        )
+
+        self.assertFalse(canceled)
+        self.assertIn("sigue bajo supervisión", message)
+        self.assertEqual(process.actions, ["terminate", "wait", "kill", "wait"])
+        self.assertTrue(job.cancel_requested)
+        self.assertIs(executor.get_process(job.id), process)
+
+    def test_unconfirmed_escalation_is_persisted_as_failure_to_cancel(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            runner = JobRunner(data_dir=temporary_directory)
+            job = Job(command=["blocked"])
+            job.transition_to(JobStatus.RUNNING)
+            runner.jobs[job.id] = job
+            process = FakeUnresponsiveProcess(stops_after_kill=False)
+            runner.executor.processes[job.id] = process
+
+            try:
+                canceled, message = runner.cancel_job(job.id)
+
+                self.assertFalse(canceled)
+                self.assertIn("sigue bajo supervisión", message)
+                events = runner.event_log.recent()
+                self.assertEqual(events[-1]["event"], "job_cancel_escalation_failed")
+                self.assertEqual(events[-1]["job_id"], job.id)
+                persisted = JobStore(temporary_directory).load()[job.id]
+                self.assertTrue(persisted.cancel_requested)
+                self.assertEqual(persisted.status, JobStatus.RUNNING)
+            finally:
+                runner.executor.processes.pop(job.id, None)
+                runner.jobs.clear()
+                runner.shutdown()
 
     def test_runner_starts_queued_jobs_when_a_slot_frees(self) -> None:
         runner = JobRunner(max_concurrency=1)

@@ -178,7 +178,18 @@ class JobRunner:
                         {"cancel_requested": job.cancel_requested},
                     )
             elif not result[0]:
-                if self.event_log is not None:
+                if (
+                    job is not None
+                    and job.status == JobStatus.RUNNING
+                    and job.cancel_requested
+                    and self.executor.get_process(job.id) is not None
+                ):
+                    self._persist(
+                        job,
+                        "job_cancel_escalation_failed",
+                        {"reason": result[1]},
+                    )
+                elif self.event_log is not None:
                     self.event_log.record(
                         "job_cancel_rejected",
                         job.id if job is not None else job_id,
