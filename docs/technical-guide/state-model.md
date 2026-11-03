@@ -17,8 +17,9 @@ Cada trabajo conserva su ID, comando, estado, timestamps, PID si se inició el
 proceso, código de salida, solicitud de cancelación y `stdout`/`stderr`. La CLI
 interactiva y el servicio local guardan los metadatos al aceptar el trabajo,
 iniciarlo, solicitar su cancelación y finalizarlo. Las salidas se guardan al
-terminar el proceso. Al iniciar, los trabajos que quedaron `QUEUED` o `RUNNING`
-se marcan como `FAILED` con una explicación de la interrupción; no se reanudan.
+terminar el proceso. Al iniciar, los trabajos `QUEUED` vuelven a la cola en
+orden de creación y se ejecutan; los `RUNNING` se marcan como `FAILED`, porque
+no se puede reconstruir con seguridad la supervisión ni los pipes del proceso.
 Al finalizar o cancelar, el monitor recoge el proceso y cierra sus pipes; el
 cierre del runner espera a que sus monitores terminen.
 
@@ -56,5 +57,7 @@ stateDiagram-v2
 
 `INTERRUPTED` se propuso para reconocer trabajos que estuvieran ejecutándose
 durante el reinicio o caída del daemon. No forma parte del enum actual: los
-trabajos persistidos que estaban activos se marcan como `FAILED`, conservando
-un mensaje que explica que fueron interrumpidos.
+trabajos persistidos `RUNNING` se marcan como `FAILED`, conservando un mensaje
+que explica que fueron interrumpidos y que no se volverán a ejecutar
+automáticamente. Los `QUEUED` se reencolan; la configuración actual de
+concurrencia controla cuántos se inician simultáneamente.

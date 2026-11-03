@@ -1,6 +1,7 @@
 import json
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -54,6 +55,65 @@ class JobStoreTests(unittest.TestCase):
             self.assertEqual(events[-1]["event"], "job_interrupted")
             self.assertEqual(events[-1]["job_id"], job.id)
             runner.shutdown()
+
+    def test_restart_resumes_queued_jobs_in_creation_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            store = JobStore(temporary_directory)
+            first = Job(
+                command=[
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(0.1); print('first')",
+                ]
+            )
+            second = Job(
+                command=[sys.executable, "-c", "print('second')"]
+            )
+            store.save(first)
+            store.save(second)
+
+            runner = JobRunner(
+                data_dir=temporary_directory,
+                max_concurrency=1,
+            )
+            try:
+                restored_first = runner.get_job(first.id)
+                restored_second = runner.get_job(second.id)
+                self.assertIsNotNone(restored_first)
+                self.assertIsNotNone(restored_second)
+
+                deadline = time.monotonic() + 5
+                while (
+                    not restored_first.is_terminal
+                    or not restored_second.is_terminal
+                ) and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                runner.executor.wait_for_jobs([first.id, second.id])
+
+                self.assertEqual(restored_first.status, JobStatus.SUCCEEDED)
+                self.assertEqual(restored_second.status, JobStatus.SUCCEEDED)
+                self.assertEqual(restored_first.stdout, "first\n")
+                self.assertEqual(restored_second.stdout, "second\n")
+                requeued_events = [
+                    event
+                    for event in EventLog(temporary_directory).recent()
+                    if event["event"] == "job_requeued"
+                ]
+                self.assertEqual(
+                    [event["job_id"] for event in requeued_events],
+                    [first.id, second.id],
+                )
+                started_events = [
+                    event
+                    for event in EventLog(temporary_directory).recent()
+                    if event["event"] == "job_started"
+                ]
+                self.assertEqual(
+                    [event["job_id"] for event in started_events],
+                    [first.id, second.id],
+                )
+            finally:
+                runner.shutdown()
 
     def test_metadata_is_persisted_through_queue_running_and_cancellation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

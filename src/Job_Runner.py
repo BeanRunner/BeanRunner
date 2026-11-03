@@ -278,13 +278,18 @@ class JobRunner:
             self.event_log.record(event, job.id if job else None, details)
 
     def _recover_incomplete_jobs(self) -> None:
+        queued_jobs = sorted(
+            (job for job in self.jobs.values() if job.status == JobStatus.QUEUED),
+            key=lambda job: (job.created_at, job.id),
+        )
         for job in self.jobs.values():
-            if job.status not in {JobStatus.QUEUED, JobStatus.RUNNING}:
+            if job.status != JobStatus.RUNNING:
                 continue
             previous_status = job.status.value
             job.error_message = (
                 f"El servicio se reinició mientras el trabajo estaba {previous_status}; "
-                "el proceso no se puede recuperar."
+                "el proceso no se puede supervisar con seguridad y no se volverá "
+                "a ejecutar automáticamente."
             )
             job.transition_to(JobStatus.FAILED)
             self._persist(
@@ -292,3 +297,8 @@ class JobRunner:
                 "job_interrupted",
                 {"previous_status": previous_status},
             )
+
+        for job in queued_jobs:
+            self.queue.append(job.id)
+            self._persist(job, "job_requeued", {"previous_status": "QUEUED"})
+        self._start_queued_jobs()
