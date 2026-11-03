@@ -63,8 +63,9 @@ class JobExecutor:
             try:
                 on_started(job)
             except Exception:
-                process.terminate()
-                process.wait()
+                process.kill()
+                process.communicate()
+                self._close_process_pipes(process)
                 with self._lock:
                     self.processes.pop(job.id, None)
                 job.error_message = "No se pudo persistir el inicio del trabajo."
@@ -76,15 +77,22 @@ class JobExecutor:
             target=self._monitor_process,
             args=(job, process, on_complete),
             name=f"beanrunner-job-{job.id}",
-            daemon=True,
         )
         with self._lock:
             self.monitors[job.id] = monitor
         monitor.start()
         return True
 
-    def cancel(self, job: Job, grace_seconds: float = 1.0) -> tuple[bool, str]:
-        """Termina el hijo y fuerza su cierre si no responde en el plazo dado."""
+    def cancel(
+        self,
+        job: Job,
+        grace_seconds: float = 1.0,
+        kill_timeout_seconds: float = 1.0,
+    ) -> tuple[bool, str]:
+        """Escalate from terminate to kill when a process ignores cancellation."""
+        if grace_seconds < 0 or kill_timeout_seconds < 0:
+            raise ValueError("Los plazos de cancelación no pueden ser negativos.")
+
         with self._lock:
             # El ID conecta el objeto Job con el Popen creado por execute().
             process = self.processes.get(job.id)
@@ -100,16 +108,49 @@ class JobExecutor:
                 logger.error("No se pudo terminar el trabajo %s: %s", job.id, error)
                 return False, f"No se pudo terminar el proceso: {error}"
 
-        # Se da tiempo para terminar normalmente antes de forzar la terminación.
         try:
             process.wait(timeout=grace_seconds)
         except subprocess.TimeoutExpired:
             logger.warning(
-                "El trabajo %s ignoró SIGTERM; se enviará terminación forzada.",
+                "El trabajo %s no terminó tras %.2f s; escalando a kill.",
+                job.id,
+                grace_seconds,
+            )
+            try:
+                process.kill()
+            except OSError as error:
+                if process.poll() is None:
+                    logger.error(
+                        "No se pudo escalar la cancelación del trabajo %s: %s",
+                        job.id,
+                        error,
+                    )
+                    return False, f"No se pudo forzar la terminación: {error}"
+            try:
+                process.wait(timeout=kill_timeout_seconds)
+            except subprocess.TimeoutExpired:
+                logger.error(
+                    "El trabajo %s sigue activo %.2f s después de kill.",
+                    job.id,
+                    kill_timeout_seconds,
+                )
+                return (
+                    False,
+                    "No se pudo confirmar la terminación forzada; "
+                    "el proceso sigue bajo supervisión.",
+                )
+            except OSError as error:
+                logger.exception(
+                    "No se pudo confirmar la terminación del trabajo %s",
+                    job.id,
+                )
+                return False, f"No se pudo confirmar la terminación: {error}"
+        except OSError as error:
+            logger.exception(
+                "Falló la espera de cancelación del trabajo %s",
                 job.id,
             )
-            process.kill()
-            process.wait()
+            return False, f"No se pudo esperar la terminación: {error}"
 
         return True, "Se solicitó la terminación del proceso."
 
@@ -118,9 +159,13 @@ class JobExecutor:
         with self._lock:
             return self.processes.get(job_id)
 
-    def wait_for_jobs(self, job_ids: list[str], timeout: float = 5.0) -> None:
+    def wait_for_jobs(
+        self,
+        job_ids: list[str],
+        timeout: float | None = None,
+    ) -> None:
         """Wait for monitor callbacks to finish persisting terminal job state."""
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + timeout if timeout is not None else None
         with self._lock:
             monitors = [
                 self.monitors[job_id]
@@ -128,7 +173,10 @@ class JobExecutor:
                 if job_id in self.monitors
             ]
         for monitor in monitors:
-            monitor.join(max(0.0, deadline - time.monotonic()))
+            if deadline is None:
+                monitor.join()
+            else:
+                monitor.join(max(0.0, deadline - time.monotonic()))
 
     @property
     def active_count(self) -> int:
@@ -162,6 +210,10 @@ class JobExecutor:
                 job.transition_to(JobStatus.FAILED)
             logger.exception("Falló la recolección del resultado del trabajo %s", job.id)
         finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            self._close_process_pipes(process)
             # Al retirar el proceso se libera un slot; el callback permite llenar la cola.
             with self._lock:
                 self.processes.pop(job.id, None)
@@ -171,3 +223,9 @@ class JobExecutor:
             finally:
                 with self._lock:
                     self.monitors.pop(job.id, None)
+
+    @staticmethod
+    def _close_process_pipes(process: subprocess.Popen[str]) -> None:
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
