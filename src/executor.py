@@ -63,8 +63,9 @@ class JobExecutor:
             try:
                 on_started(job)
             except Exception:
-                process.terminate()
-                process.wait()
+                process.kill()
+                process.communicate()
+                self._close_process_pipes(process)
                 with self._lock:
                     self.processes.pop(job.id, None)
                 job.error_message = "No se pudo persistir el inicio del trabajo."
@@ -76,7 +77,6 @@ class JobExecutor:
             target=self._monitor_process,
             args=(job, process, on_complete),
             name=f"beanrunner-job-{job.id}",
-            daemon=True,
         )
         with self._lock:
             self.monitors[job.id] = monitor
@@ -118,9 +118,13 @@ class JobExecutor:
         with self._lock:
             return self.processes.get(job_id)
 
-    def wait_for_jobs(self, job_ids: list[str], timeout: float = 5.0) -> None:
+    def wait_for_jobs(
+        self,
+        job_ids: list[str],
+        timeout: float | None = None,
+    ) -> None:
         """Wait for monitor callbacks to finish persisting terminal job state."""
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + timeout if timeout is not None else None
         with self._lock:
             monitors = [
                 self.monitors[job_id]
@@ -128,7 +132,10 @@ class JobExecutor:
                 if job_id in self.monitors
             ]
         for monitor in monitors:
-            monitor.join(max(0.0, deadline - time.monotonic()))
+            if deadline is None:
+                monitor.join()
+            else:
+                monitor.join(max(0.0, deadline - time.monotonic()))
 
     @property
     def active_count(self) -> int:
@@ -162,6 +169,10 @@ class JobExecutor:
                 job.transition_to(JobStatus.FAILED)
             logger.exception("Falló la recolección del resultado del trabajo %s", job.id)
         finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            self._close_process_pipes(process)
             # Al retirar el proceso se libera un slot; el callback permite llenar la cola.
             with self._lock:
                 self.processes.pop(job.id, None)
@@ -171,3 +182,9 @@ class JobExecutor:
             finally:
                 with self._lock:
                     self.monitors.pop(job.id, None)
+
+    @staticmethod
+    def _close_process_pipes(process: subprocess.Popen[str]) -> None:
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()

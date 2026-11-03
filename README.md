@@ -165,6 +165,9 @@ sin registrarse. Los trabajos en ejecución no cuentan para ese límite. Para
 cambiarlo en el proyecto, modifica `DEFAULT_MAX_QUEUE_SIZE` en
 `src/Job_Runner.py`; también se puede indicar `max_queue_size` al construir un
 `JobRunner`.
+Al finalizar o cancelar un trabajo, BeanRunner recoge el proceso hijo, drena y
+cierra sus pipes de salida y espera a que termine el hilo monitor. El cierre
+del runner cancela los trabajos activos y espera a que sus monitores finalicen.
 
 Sin opciones, `python3 -m src.main` conserva el comportamiento de arranque
 simple y termina después de mostrar un mensaje. Para una demostración

@@ -29,7 +29,14 @@ class JobRunnerTests(unittest.TestCase):
 
     def test_successful_process_records_output_and_exit_code(self) -> None:
         runner = JobRunner()
-        job = runner.submit_job([sys.executable, "-c", "print('runner ok')"])
+        job = runner.submit_job(
+            [
+                sys.executable,
+                "-c",
+                "import time; print('runner ok'); time.sleep(0.05)",
+            ]
+        )
+        process = runner.executor.get_process(job.id)
 
         runner.execute_job(job.id)
 
@@ -39,6 +46,11 @@ class JobRunnerTests(unittest.TestCase):
         self.assertEqual(job.stderr, "")
         self.assertIsNotNone(job.started_at)
         self.assertIsNotNone(job.finished_at)
+        runner.executor.wait_for_jobs([job.id])
+        self.assertNotIn(job.id, runner.executor.monitors)
+        self.assertIsNotNone(process)
+        self.assertTrue(process.stdout.closed)
+        self.assertTrue(process.stderr.closed)
 
     def test_failed_process_records_nonzero_exit_code(self) -> None:
         runner = JobRunner()
@@ -63,16 +75,23 @@ class JobRunnerTests(unittest.TestCase):
             [sys.executable, "-c", "import time; time.sleep(30)"]
         )
         self.assertEqual(job.status, JobStatus.RUNNING)
+        process = runner.executor.get_process(job.id)
 
         canceled, message = runner.cancel_job(job.id)
 
         self.assertTrue(canceled, message)
         final_status = self.wait_for_completion(runner, job.id)
+        runner.executor.wait_for_jobs([job.id])
         self.assertEqual(final_status, JobStatus.CANCELED)
         self.assertEqual(job.status, JobStatus.CANCELED)
         self.assertIsNotNone(job.exit_code)
         self.assertIsNotNone(job.finished_at)
         self.assertIsNone(runner.executor.get_process(job.id))
+        self.assertNotIn(job.id, runner.executor.monitors)
+        self.assertIsNotNone(process)
+        self.assertIsNotNone(process.returncode)
+        self.assertTrue(process.stdout.closed)
+        self.assertTrue(process.stderr.closed)
 
     def test_runner_starts_queued_jobs_when_a_slot_frees(self) -> None:
         runner = JobRunner(max_concurrency=1)

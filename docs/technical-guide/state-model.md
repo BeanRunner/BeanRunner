@@ -19,6 +19,8 @@ interactiva y el servicio local guardan los metadatos al aceptar el trabajo,
 iniciarlo, solicitar su cancelación y finalizarlo. Las salidas se guardan al
 terminar el proceso. Al iniciar, los trabajos que quedaron `QUEUED` o `RUNNING`
 se marcan como `FAILED` con una explicación de la interrupción; no se reanudan.
+Al finalizar o cancelar, el monitor recoge el proceso y cierra sus pipes; el
+cierre del runner espera a que sus monitores terminen.
 
 ## Diagrama de transición implementado
 
