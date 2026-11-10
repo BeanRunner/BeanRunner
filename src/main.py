@@ -10,6 +10,7 @@ from typing import TextIO
 
 from .Job_Runner import JobRunner
 from .models import Job, JobStatus
+from .service import default_data_dir
 from .submitter import InvalidCommandError, JobSubmitter
 
 
@@ -35,7 +36,10 @@ HELP_TEXT = """Comandos disponibles:
                          SUCCEEDED, FAILED o CANCELED.
   output <job-id>        Muestra stdout y stderr cuando estén disponibles.
   cancel <job-id>        Solicita cancelar un trabajo.
+  events [limite]        Muestra eventos recientes.
+  doctor                 Diagnostica la configuración y el servicio.
   help                   Muestra esta ayuda.
+  history                Muestra el historial de comandos.
   exit                   Sale y cancela los trabajos todavía activos.
 
 Ejemplo: submit python -c "print('hola')"
@@ -63,7 +67,7 @@ def run_submission_demo() -> None:
 def run_job_demo() -> None:
     """Muestra un trabajo activo, lo cancela y presenta su resultado."""
     # La instancia coordina el trabajo con JobExecutor y JobManager.
-    runner = JobRunner()
+    runner = JobRunner(data_dir=default_data_dir())
     job = runner.submit_job([sys.executable, "src/job_tests/long_job.py"])
 
     print(f"Trabajo creado: {job.id}")
@@ -107,7 +111,11 @@ def interactive_loop(
 ) -> int:
     """Lee órdenes y delega cada operación al JobRunner correspondiente."""
     # Se puede inyectar runner/streams para probar la CLI sin teclado real.
-    job_runner = runner if runner is not None else JobRunner()
+    job_runner = (
+        runner
+        if runner is not None
+        else JobRunner(data_dir=default_data_dir())
+    )
     print("BeanRunner local. Escribe 'help' para ver comandos.", file=output_stream)
 
     while True:
@@ -245,7 +253,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
 
     if arguments.interactive:
-        return interactive_loop()
+        from .cli import _interactive
+
+        return _interactive()
     if arguments.run_job_demo:
         run_job_demo()
     elif arguments.demo:

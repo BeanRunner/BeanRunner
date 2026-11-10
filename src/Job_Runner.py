@@ -12,6 +12,13 @@ from .storage import JobStore, StorageError
 from .submitter import JobSubmitter, RawCommand
 
 
+DEFAULT_MAX_QUEUE_SIZE = 5
+
+
+class QueueCapacityError(ValueError):
+    """Raised when a new job would exceed the waiting queue capacity."""
+
+
 class JobRunner:
     """Coordina los componentes que participan en el ciclo de vida de un trabajo.
 
@@ -22,11 +29,13 @@ class JobRunner:
     def __init__(
         self,
         max_concurrency: int = 3,
-        max_queue_size: int = 100, # capacidad máxima de la cola
         data_dir: str | Path | None = None,
+        max_queue_size: int = DEFAULT_MAX_QUEUE_SIZE,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency debe ser al menos 1.")
+        if max_queue_size < 1:
+            raise ValueError("max_queue_size debe ser al menos 1.")
 
         # Almacenamiento compartido: submitter crea trabajos y manager los consulta.
         self.store = JobStore(data_dir) if data_dir is not None else None
@@ -36,6 +45,7 @@ class JobRunner:
         self.queue: deque[str] = deque()
         # Límite de procesos hijos que pueden ejecutarse simultáneamente.
         self.max_concurrency = max_concurrency
+        # Límite de trabajos en espera; los procesos activos no cuentan.
         self.max_queue_size = max_queue_size
         # El mismo lock coordina cambios en trabajos, cola y operaciones del manager.
         self._lock = threading.RLock()
@@ -79,9 +89,6 @@ class JobRunner:
         with self._lock:
             if self._shutting_down:
                 raise RuntimeError("BeanRunner se está cerrando y no acepta trabajos.")
-            # Rechazo de cola llena
-            if len(self.queue) >= self.max_queue_size:
-                raise ValueError("La cola de trabajos ha alcanzado su capacidad máxima.")
             if request_id is not None and request_id in self._request_jobs:
                 existing = self._request_jobs[request_id]
                 if existing.command != valid_command or existing.cwd != cwd:
@@ -95,6 +102,18 @@ class JobRunner:
                     {"request_id": request_id},
                 )
                 return existing
+
+            queued_count = sum(
+                1
+                for job_id in self.queue
+                if (queued_job := self.jobs.get(job_id)) is not None
+                and queued_job.status == JobStatus.QUEUED
+            )
+            if queued_count >= self.max_queue_size:
+                raise QueueCapacityError(
+                    "Cola llena: capacidad máxima de "
+                    f"{self.max_queue_size} trabajos en espera."
+                )
 
             job = self.submitter.submit_job(valid_command)
             job.request_id = request_id
@@ -153,9 +172,24 @@ class JobRunner:
                 if was_queued:
                     self._persist(job, "job_cancelled")
                 else:
-                    self._record("job_cancel_requested", job)
+                    self._persist(
+                        job,
+                        "job_cancel_requested",
+                        {"cancel_requested": job.cancel_requested},
+                    )
             elif not result[0]:
-                if self.event_log is not None:
+                if (
+                    job is not None
+                    and job.status == JobStatus.RUNNING
+                    and job.cancel_requested
+                    and self.executor.get_process(job.id) is not None
+                ):
+                    self._persist(
+                        job,
+                        "job_cancel_escalation_failed",
+                        {"reason": result[1]},
+                    )
+                elif self.event_log is not None:
                     self.event_log.record(
                         "job_cancel_rejected",
                         job.id if job is not None else job_id,
@@ -187,7 +221,10 @@ class JobRunner:
             job_ids = list(self.jobs)
 
         for job in running_jobs:
-            self.manager.cancel_job(job.id)
+            try:
+                self.cancel_job(job.id)
+            except StorageError as error:
+                persistence_error = persistence_error or error
         self.executor.wait_for_jobs(job_ids)
         if persistence_error is not None:
             raise persistence_error
@@ -252,13 +289,18 @@ class JobRunner:
             self.event_log.record(event, job.id if job else None, details)
 
     def _recover_incomplete_jobs(self) -> None:
+        queued_jobs = sorted(
+            (job for job in self.jobs.values() if job.status == JobStatus.QUEUED),
+            key=lambda job: (job.created_at, job.id),
+        )
         for job in self.jobs.values():
-            if job.status not in {JobStatus.QUEUED, JobStatus.RUNNING}:
+            if job.status != JobStatus.RUNNING:
                 continue
             previous_status = job.status.value
             job.error_message = (
                 f"El servicio se reinició mientras el trabajo estaba {previous_status}; "
-                "el proceso no se puede recuperar."
+                "el proceso no se puede supervisar con seguridad y no se volverá "
+                "a ejecutar automáticamente."
             )
             job.transition_to(JobStatus.FAILED)
             self._persist(
@@ -266,3 +308,8 @@ class JobRunner:
                 "job_interrupted",
                 {"previous_status": previous_status},
             )
+
+        for job in queued_jobs:
+            self.queue.append(job.id)
+            self._persist(job, "job_requeued", {"previous_status": "QUEUED"})
+        self._start_queued_jobs()
