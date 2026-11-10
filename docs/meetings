@@ -1,0 +1,53 @@
+# Minutas de Trabajo — Proyecto BeanRunner
+### Documentación de Acuerdos y Distribución de Actividades — Avance 02 (Technical Review 2)
+
+---
+
+## Minuta 1: Reunión de Planificación y Asignación de Tareas
+
+* **Fecha:** 15 de octubre de 2026  
+* **Hora:** 21:00 hrs  
+* **Lugar:** Reunión virtual  
+* **Objetivo:** Kickoff del segundo avance, análisis de requerimientos (concurrencia, persistencia y resiliencia) y distribución oficial de *issues*.  
+* **Participantes:** Alan Alvarado, Admin Alvarez Orozco, Aaron, Joseph, Franco.  
+
+### Orden del Día
+1. Revisión de los objetivos y entregables requeridos para la Technical Review 2 (Hito 2).
+2. Análisis de arquitectura y necesidad de nuevos ADRs (concurrencia, persistencia, recuperación y cancelación).
+3. Distribución de cargas de trabajo y asignación de *issues* técnicos.
+4. Establecimiento de fechas de integración parcial antes de la entrega final.
+
+### Acuerdos y Asignación de Tareas
+
+| Integrante | Actividades Asignadas |
+| :--- | :--- |
+| **Alan Alvarado** | 1. Rechazo explícito cuando la cola alcance su capacidad.<br>2. Cancelación de trabajos en cola y ejecución.<br>3. Persistencia de metadatos. |
+| **Admin Alvarez Orozco** | 1. Política de escalamiento para trabajos que no terminan.<br>2. Recuperación después de reiniciar.<br>3. Bitácora de eventos. |
+| **Aaron** | 1. Implementar cola de trabajos.<br>2. Configurar límite de concurrencia.<br>3. Registrar estados y tiempo de trabajo. |
+| **Joseph** | 1. Captura separada de `stdout` y `stderr`.<br>2. Pruebas de validación de captura de salida. |
+| **Franco** | 1. Manejo de solicitudes concurrentes o duplicadas.<br>2. Liberación adecuada de procesos, archivos y otros recursos. |
+
+---
+
+## Minuta 2: Revisión de Avances e Integración de Componentes
+
+* **Fecha:** 30 de octubre de 2026  
+* **Hora:** 21:00 hrs  
+* **Lugar:** Sesión online  
+* **Objetivo:** Verificar integración de módulos, revisar pruebas de robustez/recuperación y preparar la defensa técnica presencial del 3 de noviembre.  
+* **Participantes:** Alan Alvarado, Admin Alvarez Orozco, Aaron, Joseph, Franco.  
+
+### Orden del Día
+1. Estado actual de la integración del núcleo concurrente y la cola de trabajos.
+2. Revisión de los mecanismos de recuperación ante caídas (*restart recovery*) y la política de escalamiento por señales.
+3. Consolidación de la documentación: Actualización de arquitectura, modelo de estados, ADRs y guías técnicas.
+4. Definición de la estrategia de defensa individual para la Technical Review 2 obligatoria del 3 de noviembre.
+
+### Acuerdos y Decisiones
+* **Estado de Integración:** Se comprobó que los componentes de cola, concurrencia y persistencia de metadatos ya se comunican correctamente en el entorno de desarrollo local. Se validó que el rechazo por saturación de cola opere sin colapsar el servicio.
+* **Pruebas de Resiliencia:** Se realizaron pruebas conjuntas simulando el reinicio del servicio para verificar que los procesos activos pasen de forma coherente al estado `INTERRUPTED` y que la política de escalamiento de dos fases (`SIGTERM` → `SIGKILL`) funcione bajo tiempos de gracia configurables.
+* **Documentación e Incidentes:** Se acordó finalizar la redacción del registro de riesgos, el AI-LOG y documentar formalmente el incidente técnico requerido (incluyendo síntomas, causa y prueba de regresión).
+* **Preparación para la Review (3 de Noviembre):** Se asignaron los temas de defensa para cada integrante de cara a la sesión presencial, asegurando que todos dominen tanto su código como la evidencia de verificación asociada.
+
+> 📌 **RECORDATORIO CRÍTICO PARA EL 3 DE NOVIEMBRE**  
+> Todos los integrantes deben llevar su equipo con el entorno probado y el repositorio actualizado en la rama principal. Se realizará un ensayo previo de simulación de fallos (*kill* de procesos y reinicio de *daemon*) antes de la presentación presencial.
