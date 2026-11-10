@@ -56,7 +56,11 @@ class JobSubmitter:
     def submit_job(self, raw_command: RawCommand) -> Job:
         """Acepta un comando válido y devuelve el trabajo en cola."""
         args = self.validate_command(raw_command)
-        job = Job(id=str(uuid.uuid4()), command=args, status=JobStatus.QUEUED)
+        
+        # Genera un ID corto de 8 caracteres hexadecimales basado en UUID v4
+        short_id = str(uuid.uuid4())[:8]
+        
+        job = Job(id=short_id, command=args, status=JobStatus.QUEUED)
         with self._lock:
             self._jobs[job.id] = job
         logger.info("Trabajo aceptado | Job ID: %s | Comando: %r", job.id, args)
